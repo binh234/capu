@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 
 
 VOCAB_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -42,6 +43,11 @@ def get_target_sent_by_edits(source_tokens, edits):
             shift_idx -= 1
         elif start == end:
             word = label.replace("$APPEND_", "")
+            # Avoid appending same token twice
+            if (target_pos < len(target_tokens) and target_tokens[target_pos] == word) or (
+                target_pos > 0 and target_tokens[target_pos - 1] == word
+            ):
+                continue
             target_tokens[target_pos: target_pos] = [word]
             shift_idx += 1
         elif label.startswith("$TRANSFORM_"):
@@ -66,6 +72,7 @@ def replace_merge_transforms(tokens):
     target_line = " ".join(tokens)
     target_line = target_line.replace(" $MERGE_HYPHEN ", "-")
     target_line = target_line.replace(" $MERGE_SPACE ", "")
+    target_line = re.sub(r'([\.\,\?\:]\s+)+', r'\1', target_line)
     return target_line.split()
 
 
@@ -207,3 +214,5 @@ def get_weights_name(transformer_name, lowercase):
         return 'xlnet-base-cased'
     if transformer_name == 'xlnet-large':
         return 'xlnet-large-cased'
+
+    return transformer_name

@@ -295,7 +295,8 @@ class Trainer(TrainerBase):
         """
         Trains one epoch and returns metrics.
         """
-        logger.info("Epoch %d/%d", epoch, self._num_epochs - 1)
+        logger.info("Epoch %d/%d", epoch + 1, self._num_epochs)
+        print(f"Epoch {epoch + 1}/{self._num_epochs}")
         peak_cpu_usage = peak_memory_mb()
         logger.info(f"Peak CPU memory usage MB: {peak_cpu_usage}")
         gpu_usage = []
@@ -513,6 +514,7 @@ class Trainer(TrainerBase):
         """
         try:
             epoch_counter = self._restore_checkpoint()
+            print("Checkpoint restored")
         except RuntimeError:
             traceback.print_exc()
             raise ConfigurationError(
@@ -531,9 +533,9 @@ class Trainer(TrainerBase):
         metrics: Dict[str, Any] = {}
         epochs_trained = 0
         training_start_time = time.time()
+        base_lr = self.optimizer.param_groups[0]['lr']
 
-        if self.cold_step_count > 0:
-            base_lr = self.optimizer.param_groups[0]['lr']
+        if self.cold_step_count > epoch_counter:
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.cold_lr
             self.model.text_field_embedder._token_embedders['bert'].set_weights(freeze=True)
@@ -543,7 +545,7 @@ class Trainer(TrainerBase):
             metrics["best_validation_" + key] = value
 
         for epoch in range(epoch_counter, self._num_epochs):
-            if epoch == self.cold_step_count and epoch != 0:
+            if epoch == self.cold_step_count and epochs_trained != 0:
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = base_lr
                 self.model.text_field_embedder._token_embedders['bert'].set_weights(freeze=False)

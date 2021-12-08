@@ -1,10 +1,13 @@
-# GECToR – Grammatical Error Correction: Tag, Not Rewrite
+# Capitalization and Punctuation for Automatic Speech Recognition
 
-This repository provides code for training and testing state-of-the-art models for grammatical error correction with the official PyTorch implementation of the following paper:
-> [GECToR – Grammatical Error Correction: Tag, Not Rewrite](https://arxiv.org/abs/2005.12592) <br>
-> [Kostiantyn Omelianchuk](https://github.com/komelianchuk), [Vitaliy Atrasevych](https://github.com/atrasevych), [Artem Chernodub](https://github.com/achernodub), [Oleksandr Skurzhanskyi](https://github.com/skurzhanskyi) <br>
-> Grammarly <br>
-> [15th Workshop on Innovative Use of NLP for Building Educational Applications (co-located with ACL 2020)](https://sig-edu.org/bea/current) <br>
+Automatic Speech Recognition (ASR) systems typically generate text with no punctuation and capitalization of the words. This repository provides code for training and predicting punctuation and capitalization for each word in a sentence to make ASR output more readable and to boost the performance of the named entity recognition, machine translation, or text-to-speech models. The model for this task was trained using a pre-trained BERT model. For every word in our training dataset, we’re going to predict:
+
+- punctuation mark that should follow the word and
+- whether the word should be capitalized
+
+Main idea was introduced in the following paper with the official PyTorch implementation:
+> [GECToR – Grammatical Error Correction: Tag, Not Rewrite](https://arxiv.org/abs/2005.12592) 
+> [Grammarly](https://github.com/grammarly/gector)
 
 It is mainly based on `AllenNLP` and `transformers`.
 ## Installation
@@ -15,57 +18,14 @@ pip install -r requirements.txt
 The project was tested using Python 3.7.
 
 ## Datasets
-All the public GEC datasets used in the paper can be downloaded from [here](https://www.cl.cam.ac.uk/research/nl/bea2019st/#data).<br>
-Synthetically created datasets can be generated/downloaded [here](https://github.com/awasthiabhijeet/PIE/tree/master/errorify).<br>
+This model can work with any text dataset. The raw dataset should be preprocessed into two files, one `source` file and one `target` file. The `target` file should contain final texts, whereas the `source` file is simply the lowercase version with punctuations removed from the `target` file.<br>
+
+**Note**: Punctuations should be space-separated with words.<br>
+
 To train the model data has to be preprocessed and converted to special format with the command:
 ```.bash
 python utils/preprocess_data.py -s SOURCE -t TARGET -o OUTPUT_FILE
 ```
-## Pretrained models
-<table>
-  <tr>
-    <th>Pretrained encoder</th>
-    <th>Confidence bias</th>
-    <th>Min error prob</th>
-    <th>CoNNL-2014 (test)</th>
-    <th>BEA-2019 (test)</th>
-  </tr>
-  <tr>
-    <th>BERT <a href="https://grammarly-nlp-data-public.s3.amazonaws.com/gector/bert_0_gector.th">[link]</a></th>
-    <th>0.10</th>
-    <th>0.41</th>
-    <th>63.0</th>
-    <th>67.6</th>
-  </tr>
-  <tr>
-    <th>RoBERTa <a href="https://grammarly-nlp-data-public.s3.amazonaws.com/gector/roberta_1_gector.th">[link]</a></th>
-    <th>0.20</th>
-    <th>0.50</th>
-    <th>64.0</th>
-    <th>71.5</th>
-  </tr>
-  <tr>
-    <th>XLNet <a href="https://grammarly-nlp-data-public.s3.amazonaws.com/gector/xlnet_0_gector.th">[link]</a></th>
-    <th>0.35</th>
-    <th>0.66</th>
-    <th>65.3</th>
-    <th>72.4</th>
-  </tr>
-  <tr>
-    <th>RoBERTa + XLNet</th>
-    <th>0.24</th>
-    <th>0.45</th>
-    <th>66.0</th>
-    <th>73.7</th>
-  </tr>
-  <tr>
-    <th>BERT + RoBERTa + XLNet</th>
-    <th>0.16</th>
-    <th>0.40</th>
-    <th>66.5</th>
-    <th>73.6</th>
-  </tr>
-</table>
 
 ## Train model
 To train the model, simply run:
@@ -75,15 +35,9 @@ python train.py --train_set TRAIN_SET --dev_set DEV_SET \
 ```
 There are a lot of parameters to specify among them:
 - `cold_steps_count` the number of epochs where we train only last linear layer
-- `transformer_model {bert,distilbert,gpt2,roberta,transformerxl,xlnet,albert}` model encoder
+- `transformer_model {bert, distilbert, gpt2, roberta, transformerxl, xlnet, albert, xlm-r, phobert}` model encoder
 - `tn_prob` probability of getting sentences with no errors; helps to balance precision/recall
 - `pieces_per_token` maximum number of subwords per token; helps not to get CUDA out of memory
-
-In our experiments we had 98/2 train/dev split.
-
-## Training parameters
-We described all parameters that we use for training and evaluating [here](https://github.com/grammarly/gector/blob/master/docs/training_parameters.md). 
-<br>
 
 ## Model inference
 To run your model on the input file use the following command:
@@ -96,11 +50,6 @@ Among parameters:
 - `min_error_probability` - minimum error probability (as in the paper)
 - `additional_confidence` - confidence bias (as in the paper)
 - `special_tokens_fix` to reproduce some reported results of pretrained models
-
-For evaluation use [M^2Scorer](https://github.com/nusnlp/m2scorer) and [ERRANT](https://github.com/chrisjbryant/errant).
-
-## Text Simplification
-The code and README for Text Simplification version of GECToR will be added soon.
 
 ## Citation
 If you find this work is useful for your research, please cite our paper:

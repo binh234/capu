@@ -128,7 +128,8 @@ class PretrainedBertIndexer(TokenizerIndexer):
                  do_lowercase: bool = True,
                  max_pieces: int = 512,
                  max_pieces_per_token: int = 5,
-                 special_tokens_fix: int = 0) -> None:
+                 special_tokens_fix: int = 0,
+                 use_fast: bool = True) -> None:
 
         if pretrained_model.endswith("-cased") and do_lowercase:
             logger.warning("Your BERT model appears to be cased, "
@@ -140,7 +141,7 @@ class PretrainedBertIndexer(TokenizerIndexer):
         model_name = copy.deepcopy(pretrained_model)
 
         model_tokenizer = AutoTokenizer.from_pretrained(
-            model_name, do_lower_case=do_lowercase, do_basic_tokenize=False, use_fast=True)
+            model_name, do_lower_case=do_lowercase, do_basic_tokenize=False, use_fast=use_fast)
 
         # to adjust all tokenizers
         if hasattr(model_tokenizer, 'encoder'):

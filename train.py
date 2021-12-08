@@ -13,6 +13,7 @@ from gector.datareader import Seq2LabelsDatasetReader
 from gector.seq2labels_model import Seq2Labels
 from gector.trainer import Trainer
 from gector.tokenizer_indexer import PretrainedBertIndexer
+from gector.wordpiece_indexer import PretrainedBertIndexer as WordpieceIndexer
 from utils.helpers import get_weights_name
 
 
@@ -24,13 +25,23 @@ def fix_seed():
     seed(43)
 
 
-def get_token_indexers(model_name, max_pieces_per_token=5, lowercase_tokens=True, special_tokens_fix=0):
-    bert_token_indexer = PretrainedBertIndexer(
-        pretrained_model=model_name,
-        max_pieces_per_token=max_pieces_per_token,
-        do_lowercase=lowercase_tokens,
-        special_tokens_fix=special_tokens_fix
-    )
+def get_token_indexers(model_name, max_pieces_per_token=5, lowercase_tokens=True, special_tokens_fix=0, use_fast=1):
+    if use_fast:
+        bert_token_indexer = PretrainedBertIndexer(
+            pretrained_model=model_name,
+            max_pieces_per_token=max_pieces_per_token,
+            do_lowercase=lowercase_tokens,
+            special_tokens_fix=special_tokens_fix,
+            use_fast=True
+        )
+    else:
+        bert_token_indexer = WordpieceIndexer(
+            pretrained_model=model_name,
+            max_pieces_per_token=max_pieces_per_token,
+            do_lowercase=lowercase_tokens,
+            use_starting_offsets=True,
+            special_tokens_fix=special_tokens_fix
+        )
     return {'bert': bert_token_indexer}
 
 
@@ -39,7 +50,8 @@ def get_token_embedders(model_name, tune_bert=False, special_tokens_fix=0):
     bert_token_emb = PretrainedBertEmbedder(
         pretrained_model=model_name,
         top_layer_only=True, requires_grad=take_grads,
-        special_tokens_fix=special_tokens_fix)
+        special_tokens_fix=special_tokens_fix
+    )
 
     token_embedders = {'bert': bert_token_emb}
     embedder_to_indexer_map = {"bert": ["bert", "bert-offsets"]}
@@ -53,12 +65,13 @@ def get_token_embedders(model_name, tune_bert=False, special_tokens_fix=0):
 def get_data_reader(model_name, max_len, skip_correct=False, skip_complex=0,
                     test_mode=False, tag_strategy="keep_one",
                     broken_dot_strategy="keep", lowercase_tokens=True,
-                    max_pieces_per_token=3, tn_prob=0, tp_prob=1, special_tokens_fix=0,):
+                    max_pieces_per_token=3, tn_prob=0, tp_prob=1, special_tokens_fix=0,
+                    use_fast=1):
     token_indexers = get_token_indexers(model_name,
                                         max_pieces_per_token=max_pieces_per_token,
                                         lowercase_tokens=lowercase_tokens,
-                                        special_tokens_fix=special_tokens_fix
-                                        )
+                                        special_tokens_fix=special_tokens_fix,
+                                        use_fast=use_fast)
     reader = Seq2LabelsDatasetReader(token_indexers=token_indexers,
                                      max_len=max_len,
                                      skip_correct=skip_correct,
@@ -77,7 +90,8 @@ def get_model(model_name, vocab, tune_bert=False,
               label_smoothing=0.0,
               confidence=0,
               special_tokens_fix=0):
-    token_embs = get_token_embedders(model_name, tune_bert=tune_bert, special_tokens_fix=special_tokens_fix)
+    token_embs = get_token_embedders(
+        model_name, tune_bert=tune_bert, special_tokens_fix=special_tokens_fix)
     model = Seq2Labels(vocab=vocab,
                        text_field_embedder=token_embs,
                        predictor_dropout=predictor_dropout,
@@ -92,6 +106,7 @@ def main(args):
         os.mkdir(args.model_dir)
 
     weights_name = get_weights_name(args.transformer_model, args.lowercase_tokens)
+    # weights_name = args.transformer_model
     # read datasets
     reader = get_data_reader(weights_name, args.max_len, skip_correct=bool(args.skip_correct),
                              skip_complex=args.skip_complex,
@@ -101,7 +116,8 @@ def main(args):
                              max_pieces_per_token=args.pieces_per_token,
                              tn_prob=args.tn_prob,
                              tp_prob=args.tp_prob,
-                             special_tokens_fix=args.special_tokens_fix)
+                             special_tokens_fix=args.special_tokens_fix,
+                             use_fast=args.use_fast)
     train_data = reader.read(args.train_set)
     dev_data = reader.read(args.dev_set)
 
@@ -136,26 +152,31 @@ def main(args):
         cuda_device = -1
 
     if args.pretrain:
-        model.load_state_dict(torch.load(os.path.join(args.pretrain_folder, args.pretrain + '.th')))
+        model.load_state_dict(torch.load(os.path.join(
+            args.pretrain_folder, args.pretrain + '.th')))
 
     model = model.to(device)
 
     print("Model is set")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, factor=0.1, patience=10)
     instances_per_epoch = None if not args.updates_per_epoch else \
         int(args.updates_per_epoch * args.batch_size * args.accumulation_size)
+    max_instances_in_memory = args.batch_size * 16
+    # max_instances_in_memory = None
     iterator = BucketIterator(batch_size=args.batch_size,
                               sorting_keys=[("tokens", "num_tokens")],
                               biggest_batch_first=True,
-                              max_instances_in_memory=instances_per_epoch,
+                              max_instances_in_memory=max_instances_in_memory,
                               instances_per_epoch=instances_per_epoch,
                               )
     iterator.index_with(vocab)
+
     val_iterator = BucketIterator(batch_size=args.batch_size,
-                                  sorting_keys=[("tokens", "num_tokens")], 
+                                  sorting_keys=[("tokens", "num_tokens")],
+                                  max_instances_in_memory=max_instances_in_memory,
                                   instances_per_epoch=None)
     val_iterator.index_with(vocab)
 
@@ -235,7 +256,7 @@ if __name__ == '__main__':
                         default=0)
     parser.add_argument('--tune_bert',
                         type=int,
-                        help='If more then 0 then fine tune bert.',
+                        help='If more than 0 then fine tune bert.',
                         default=1)
     parser.add_argument('--tag_strategy',
                         choices=['keep_one', 'merge_all'],
@@ -296,12 +317,17 @@ if __name__ == '__main__':
                         default='')
     parser.add_argument('--transformer_model',
                         choices=['bert', 'distilbert', 'gpt2', 'roberta', 'transformerxl', 'xlnet', 'albert',
-                                 'bert-large', 'roberta-large', 'xlnet-large'],
+                                 'bert-large', 'roberta-large', 'xlnet-large', 'vinai/phobert-base',
+                                 'vinai/phobert-large', 'xlm-roberta-base'],
                         help='Name of the transformer model.',
                         default='roberta')
     parser.add_argument('--special_tokens_fix',
                         type=int,
                         help='Whether to fix problem with [CLS], [SEP] tokens tokenization.',
+                        default=1)
+    parser.add_argument('--use_fast',
+                        type=int,
+                        help='Whether to use fast tokenization.',
                         default=1)
 
     args = parser.parse_args()

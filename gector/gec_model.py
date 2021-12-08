@@ -16,6 +16,7 @@ from allennlp.nn import util
 from gector.bert_token_embedder import PretrainedBertEmbedder
 from gector.seq2labels_model import Seq2Labels
 from gector.tokenizer_indexer import PretrainedBertIndexer
+from gector.wordpiece_indexer import PretrainedBertIndexer as WordpieceIndexer
 from utils.helpers import PAD, UNK, get_target_sent_by_edits, START_TOKEN
 from utils.helpers import get_weights_name
 
@@ -156,12 +157,21 @@ class GecBERTModel(object):
         return text_field_embedder
 
     def _get_indexer(self, weights_name, special_tokens_fix):
-        bert_token_indexer = PretrainedBertIndexer(
+        if "phobert" in weights_name:
+            bert_token_indexer = WordpieceIndexer(
             pretrained_model=weights_name,
-            do_lowercase=self.lowercase_tokens,
             max_pieces_per_token=5,
+            do_lowercase=self.lowercase_tokens,
+            use_starting_offsets=True,
             special_tokens_fix=special_tokens_fix
         )
+        else:
+            bert_token_indexer = PretrainedBertIndexer(
+                pretrained_model=weights_name,
+                do_lowercase=self.lowercase_tokens,
+                max_pieces_per_token=5,
+                special_tokens_fix=special_tokens_fix
+            )
         return {'bert': bert_token_indexer}
 
     def preprocess(self, token_batch):
