@@ -6,7 +6,7 @@ Automatic Speech Recognition (ASR) systems typically generate text with no punct
 - whether the word should be capitalized
 
 Main idea was introduced in the following paper with the official PyTorch implementation:
-> [GECToR – Grammatical Error Correction: Tag, Not Rewrite](https://arxiv.org/abs/2005.12592) 
+> [GECToR – Grammatical Error Correction: Tag, Not Rewrite](https://arxiv.org/abs/2005.12592)<br>
 > [Grammarly](https://github.com/grammarly/gector)
 
 It is mainly based on `AllenNLP` and `transformers`.
