@@ -202,7 +202,7 @@ def apply_transformation(source_token, target_token):
 #         if tag == 'equal':
 #             continue
 #         elif tag == 'delete':
-#             # delete all words separatly
+#             # delete all words separately
 #             for j in range(i2 - i1):
 #                 edit = [(i1 + j, i1 + j + 1), '$DELETE']
 #                 all_edits.append(edit)

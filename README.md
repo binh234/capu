@@ -35,7 +35,7 @@ python train.py --train_set TRAIN_SET --dev_set DEV_SET \
 ```
 There are a lot of parameters to specify among them:
 - `cold_steps_count` the number of epochs where we train only last linear layer
-- `transformer_model {bert, distilbert, gpt2, roberta, transformerxl, xlnet, albert, xlm-r, phobert}` model encoder
+- `transformer_model {bert, distilbert, gpt2, roberta, transformerxl, xlnet, albert, xlm-r, phobert, ...}` model encoder
 - `tn_prob` probability of getting sentences with no errors; helps to balance precision/recall
 - `pieces_per_token` maximum number of subwords per token; helps not to get CUDA out of memory
 

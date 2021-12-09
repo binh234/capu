@@ -57,7 +57,7 @@ def split_chunks(batch, chunk_size=32, overlap_size=8):
     for tokens in batch:
         start = len(result)
         num_token = len(tokens)
-        if num_token <= 8:
+        if num_token <= overlap_size:
             result.append(tokens)
 
         for i in range(0, num_token - overlap_size, stride):
@@ -142,7 +142,7 @@ if __name__ == '__main__':
                         type=int,
                         help='The max sentence length'
                              '(all longer will be truncated)',
-                        default=50)
+                        default=64)
     parser.add_argument('--min_len',
                         type=int,
                         help='The minimum sentence length'
