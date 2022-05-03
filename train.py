@@ -1,4 +1,6 @@
 import argparse
+import logging
+import math
 import os
 from random import seed
 
@@ -15,7 +17,9 @@ from gector.trainer import Trainer
 from gector.tokenizer_indexer import PretrainedBertIndexer
 from gector.wordpiece_indexer import PretrainedBertIndexer as WordpieceIndexer
 from utils.helpers import get_weights_name
+from transformers import get_scheduler
 
+logger = logging.getLogger(__name__)
 
 def fix_seed():
     torch.manual_seed(1)
@@ -83,6 +87,14 @@ def get_data_reader(model_name, max_len, skip_correct=False, skip_complex=0,
                                      tn_prob=tn_prob,
                                      tp_prob=tp_prob)
     return reader
+
+def line_count(file_path):
+    cnt = 0
+    with open(file_path, 'r') as f:
+        for line in f:
+            cnt += 1
+    
+    return cnt
 
 
 def get_model(model_name, vocab, tune_bert=False,
@@ -160,8 +172,20 @@ def main(args):
     print("Model is set")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, factor=0.1, patience=10)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, factor=0.1, patience=2)
+    if args.updates_per_epoch:
+        num_training_steps = args.updates_per_epoch * (args.n_epoch - args.cold_steps_count)
+    else:
+        num_instances = math.ceil(line_count(args.train_set) / args.batch_size)
+        num_training_steps = math.ceil(num_instances / args.accumulation_size) * (args.n_epoch - args.cold_steps_count)
+
+    scheduler = get_scheduler(
+            "linear",
+            optimizer=optimizer,
+            num_warmup_steps=0.08*num_training_steps,
+            num_training_steps=num_training_steps
+        )
     instances_per_epoch = None if not args.updates_per_epoch else \
         int(args.updates_per_epoch * args.batch_size * args.accumulation_size)
     max_instances_in_memory = args.batch_size * 16
@@ -195,8 +219,10 @@ def main(args):
                       accumulated_batch_count=args.accumulation_size,
                       cold_step_count=args.cold_steps_count,
                       cold_lr=args.cold_lr,
+                      should_log_learning_rate=True,
                       cuda_verbose_step=int(args.cuda_verbose_steps)
-                      if args.cuda_verbose_steps else None
+                      if args.cuda_verbose_steps else None,
+                      logger=logger
                       )
     print("Start training")
     trainer.train()
@@ -269,7 +295,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr',
                         type=float,
                         help='Set initial learning rate.',
-                        default=1e-5)
+                        default=5e-5)
     parser.add_argument('--cold_steps_count',
                         type=int,
                         help='Whether to train only classifier layers first.',
@@ -316,9 +342,6 @@ if __name__ == '__main__':
                         help='The name of the pretrain weights in pretrain_folder param.',
                         default='')
     parser.add_argument('--transformer_model',
-                        choices=['bert', 'distilbert', 'gpt2', 'roberta', 'transformerxl', 'xlnet', 'albert',
-                                 'bert-large', 'roberta-large', 'xlnet-large', 'vinai/phobert-base',
-                                 'vinai/phobert-large', 'xlm-roberta-base'],
                         help='Name of the transformer model.',
                         default='roberta')
     parser.add_argument('--special_tokens_fix',

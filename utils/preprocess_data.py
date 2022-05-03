@@ -1,6 +1,7 @@
 import argparse
 import os
 from difflib import SequenceMatcher
+import re
 
 import Levenshtein
 import numpy as np
@@ -82,13 +83,40 @@ def _split(token):
 
 def apply_merge_transformation(source_tokens, target_words, shift_idx):
     edits = []
+    edits = []
     if len(source_tokens) > 1 and len(target_words) == 1:
         # check merge
-        transform = check_merge(source_tokens, target_words)
-        if transform:
-            for i in range(len(source_tokens) - 1):
-                edits.append([(shift_idx + i, shift_idx + i + 1), transform])
+        if target_words[0].isalpha() == False and target_words[0].isdigit() == False:
+            clean = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", target_words[0])
+            clean = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", clean)
+            sub_target_words = clean.split()
+
+            if len(source_tokens) != len(sub_target_words):
+                return None
+            
+            for i, (src, tgt) in enumerate(zip(source_tokens, sub_target_words)):
+                if len(tgt) == len(src):
+                    transform = check_casetype(src, tgt)
+                    if not transform:
+                        transform = check_verb(src, tgt)
+                    if transform:
+                        edits.append([(shift_idx + i, shift_idx + i + 1), transform])
+                else:
+                    transform = check_verb(src, tgt)
+                    if transform:
+                        edits.append([(shift_idx + i, shift_idx + i + 1), transform])
+
+            transform = check_merge(sub_target_words, target_words)
+            if transform:
+                for i in range(len(source_tokens) - 1):
+                    edits.append([(shift_idx + i, shift_idx + i + 1), transform])
             return edits
+        else:
+            transform = check_merge(source_tokens, target_words)
+            if transform:
+                for i in range(len(source_tokens) - 1):
+                    edits.append([(shift_idx + i, shift_idx + i + 1), transform])
+                return edits
 
     if len(source_tokens) == len(target_words) == 2:
         # check swap
@@ -106,6 +134,8 @@ def is_sent_ok(sent, delimeters=SEQ_DELIMETERS):
 
 
 def check_casetype(source_token, target_token):
+    if source_token == target_token:
+        return None
     if source_token.lower() != target_token.lower():
         return None
     if source_token.lower() == target_token:
@@ -186,60 +216,13 @@ def apply_transformation(source_token, target_token):
     return None
 
 
-# def align_sequences(source_sent, target_sent):
-#     # check if sent is OK
-#     if not is_sent_ok(source_sent) or not is_sent_ok(target_sent):
-#         return None
-#     source_tokens = source_sent.split()
-#     target_tokens = target_sent.split()
-#     matcher = SequenceMatcher(None, source_tokens, target_tokens)
-#     diffs = list(matcher.get_opcodes())
-#     all_edits = []
-#     for diff in diffs:
-#         tag, i1, i2, j1, j2 = diff
-#         source_part = _split(" ".join(source_tokens[i1:i2]))
-#         target_part = _split(" ".join(target_tokens[j1:j2]))
-#         if tag == 'equal':
-#             continue
-#         elif tag == 'delete':
-#             # delete all words separately
-#             for j in range(i2 - i1):
-#                 edit = [(i1 + j, i1 + j + 1), '$DELETE']
-#                 all_edits.append(edit)
-#         elif tag == 'insert':
-#             # append to the previous word
-#             for target_token in target_part:
-#                 edit = ((i1 - 1, i1), f"$APPEND_{target_token}")
-#                 all_edits.append(edit)
-#         else:
-#             # check merge first of all
-#             edits = apply_merge_transformation(source_part, target_part,
-#                                                shift_idx=i1)
-#             if edits:
-#                 all_edits.extend(edits)
-#                 continue
+def check_alnum(s):
+    if len(s) < 2:
+        return False
+    return not (s.isalpha() or s.isdigit())
 
-#             # normalize alignments if need (make them singleton)
-#             _, alignments = perfect_align(source_part, target_part,
-#                                           insertions_allowed=0)
-#             for alignment in alignments:
-#                 new_shift = alignment[2][0]
-#                 edits = convert_alignments_into_edits(alignment,
-#                                                       shift_idx=i1 + new_shift)
-#                 all_edits.extend(edits)
 
-#     # get labels
-#     labels = convert_edits_into_labels(source_tokens, all_edits)
-#     # match tags to source tokens
-#     sent_with_tags = add_labels_to_the_tokens(source_tokens, labels)
-#     return sent_with_tags
-
-def align_sequences(source_sent, target_sent):
-    # check if sent is OK
-    if not is_sent_ok(source_sent) or not is_sent_ok(target_sent):
-        return None
-    source_tokens = source_sent.split()
-    target_tokens = target_sent.split()
+def find_matching(source_tokens, target_tokens):
     i, j, n, m = 0, 0, len(source_tokens), len(target_tokens)
     diffs = []
 
@@ -249,12 +232,36 @@ def align_sequences(source_sent, target_sent):
                 diffs.append(('replace', i, i + 1, j, j + 1))
             i += 1
         else:
-            diffs.append(('insert', i, i, j, j + 1))
+            if target_tokens[j].isdigit() or target_tokens[j].isalpha():
+                diffs.append(('replace', i, i + 1, j, j + 1))
+                i += 1
+            elif check_alnum(target_tokens[j]):
+                clean_token = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", target_tokens[j])
+                clean_token = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", clean_token)
+                num_token = len(clean_token.split())
+
+                diffs.append(('replace', i, i + num_token, j, j + 1))
+                i += num_token
+            else: # Punctuation
+                diffs.append(('insert', i, i, j, j + 1))
+
         j += 1 
 
     if j < m:
         diffs.append(('insert', n, n, j, m))
+    
+    return diffs
 
+
+def align_sequences(source_sent, target_sent):
+    # check if sent is OK
+    if not is_sent_ok(source_sent) or not is_sent_ok(target_sent):
+        return None
+    source_tokens = source_sent.split()
+    target_tokens = target_sent.split()
+    # matcher = SequenceMatcher(None, source_tokens, target_tokens)
+    # diffs = list(matcher.get_opcodes())
+    diffs = find_matching(source_tokens, target_tokens)
     all_edits = []
     for diff in diffs:
         tag, i1, i2, j1, j2 = diff
@@ -263,7 +270,7 @@ def align_sequences(source_sent, target_sent):
         if tag == 'equal':
             continue
         elif tag == 'delete':
-            # delete all words separatly
+            # delete all words separately
             for j in range(i2 - i1):
                 edit = [(i1 + j, i1 + j + 1), '$DELETE']
                 all_edits.append(edit)
@@ -390,10 +397,10 @@ def add_labels_to_the_tokens(source_tokens, labels, delimeters=SEQ_DELIMETERS):
 
 def convert_data_from_raw_files(source_file, target_file, output_file, chunk_size):
     tagged = []
-    source_data, target_data = read_parallel_lines(source_file, target_file)
-    print(f"The size of raw dataset is {len(source_data)}")
+    data = read_parallel_lines(source_file, target_file)
+    # print(f"The size of raw dataset is {len(source_data)}")
     cnt_total, cnt_all, cnt_tp = 0, 0, 0
-    for source_sent, target_sent in tqdm(zip(source_data, target_data)):
+    for source_sent, target_sent in tqdm(data):
         try:
             aligned_sent = align_sequences(source_sent, target_sent)
         except Exception:

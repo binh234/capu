@@ -119,12 +119,12 @@ class Seq2Labels(Model):
         An output dictionary consisting of:
         logits : torch.FloatTensor
             A tensor of shape ``(batch_size, num_tokens, tag_vocab_size)`` representing
-            unnormalised log probabilities of the tag classes.
+            unnormalized log probabilities of the tag classes.
         class_probabilities : torch.FloatTensor
             A tensor of shape ``(batch_size, num_tokens, tag_vocab_size)`` representing
             a distribution of the tag classes per word.
         loss : torch.FloatTensor, optional
-            A scalar loss to be optimised.
+            A scalar loss to be optimized.
 
         """
         encoded_text = self.text_field_embedder(tokens)

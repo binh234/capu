@@ -1,4 +1,5 @@
 import argparse
+from shlex import split
 
 from utils.helpers import read_lines
 from gector.gec_model import GecBERTModel
@@ -26,7 +27,10 @@ def predict_for_file(
             if split_chunk:
                 batch, batch_indices = split_chunks(batch, chunk_size, overlap_size)
                 preds, cnt = model.handle_batch(batch)
-                preds = merge_chunk([" ".join(x) for x in preds], batch_indices, overlap_size, min_words_cut)
+                preds = [
+                    merge_chunk(preds[start:end], overlap_size, min_words_cut) 
+                    for (start, end) in batch_indices
+                ]
             else:
                 preds, cnt = model.handle_batch(batch)
                 preds = [" ".join(x) for x in preds]
@@ -37,7 +41,10 @@ def predict_for_file(
         if split_chunk:
             batch, batch_indices = split_chunks(batch, chunk_size, overlap_size)
             preds, cnt = model.handle_batch(batch)
-            preds = merge_chunk([" ".join(x) for x in preds], batch_indices, overlap_size, min_words_cut)
+            preds = [
+                    merge_chunk(preds[start:end], overlap_size, min_words_cut) 
+                    for (start, end) in batch_indices
+            ]
         else:
             preds, cnt = model.handle_batch(batch)
             preds = [" ".join(x) for x in preds]
@@ -57,49 +64,99 @@ def split_chunks(batch, chunk_size=32, overlap_size=8):
     for tokens in batch:
         start = len(result)
         num_token = len(tokens)
-        if num_token <= overlap_size:
+        if num_token <= chunk_size:
             result.append(tokens)
-
-        for i in range(0, num_token - overlap_size, stride):
-            result.append(tokens[i: i + chunk_size])
+        elif num_token > chunk_size and num_token < (chunk_size * 2 - overlap_size):
+            split_idx = (num_token + overlap_size + 1) // 2
+            result.append(tokens[:split_idx])
+            result.append(tokens[split_idx - overlap_size:])
+        else:
+            for i in range(0, num_token - overlap_size, stride):
+                result.append(tokens[i: i + chunk_size])
 
         indices.append((start, len(result)))
 
     return result, indices
 
 
-def merge_chunk(batch, indices, overlap_size=8, min_words_cut=4):
-    head = overlap_size - min_words_cut
-    tail = min_words_cut
+def check_alnum(s):
+    if len(s) < 2:
+        return False
+    return not (s.isalpha() or s.isdigit())
+
+
+def apply_chunk_merging(tokens, next_tokens, punc_dict={':', ".", ",", "?"}, overlap_size=8, min_words_cut=4):
+    num_words = 0
+    num_words_cut = 0
+    head_idx = tail_idx = 0
+
+    # Return next tokens if current tokens list is empty
+    if not tokens:
+        return next_tokens
+    
+    for token in tokens[::-1]:
+        if token not in punc_dict:
+            if check_alnum(token):
+                clean_token = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", token)
+                clean_token = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", clean_token)
+                word_len = len(clean_token.split())
+            else:
+                word_len = 1
+            
+            if num_words_cut + word_len > min_words_cut:
+                break
+            
+            num_words_cut += word_len
+        tail_idx += 1
+    
+    tokens = tokens[:-tail_idx]
+    
+    num_words_pass = overlap_size - num_words_cut
+    for token in next_tokens:
+        if token not in punc_dict:
+            sub_tokens = []
+            if check_alnum(token):
+                clean_token = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", token)
+                clean_token = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", clean_token)
+                sub_tokens = clean_token.split()
+                num_words += len(sub_tokens)
+            else:
+                num_words += 1
+            
+            if num_words >= num_words_pass:
+                head_idx += 1
+                if num_words > num_words_pass:
+                    idx = num_words - num_words_pass
+                    tokens.append("".join(sub_tokens[len(sub_tokens) - idx:]))
+                break
+
+        head_idx += 1
+
+    tokens.extend(next_tokens[head_idx:])
+    return tokens
+
+
+def merge_chunk(batch, overlap_size=8, min_words_cut=4):
     result = []
-    for (start, end) in indices:
-        tokens = []
-        for i in range(start, end):
+    punc_dict = {':', ".", ",", "?"}
+    if len(batch) == 1 or overlap_size == 0:
+        for sub_tokens in batch:
+            result.extend(sub_tokens)
+    else:
+        for _, sub_tokens in enumerate(batch):
             try:
-                sub_text = batch[i].strip()
-                sub_text = re.sub(r'([\.\,\?\:]\s+)+', r'\1', sub_text)
-                sub_text = re.sub(r'\s+([\.\,\?\:])', r'\1', sub_text)
-                sub_tokens = sub_text.split()
-                if i == start:
-                    if i == end - 1:
-                        tokens = sub_tokens
-                    else:
-                        tokens.extend(sub_tokens[:-tail])
-                elif i == end - 1:
-                    tokens.extend(sub_tokens[head:])
-                else:
-                    tokens.extend(sub_tokens[head:-tail])
+                result = apply_chunk_merging(result, sub_tokens, punc_dict, overlap_size, min_words_cut)
             except Exception as e:
                 print(e)
 
-        text = " ".join(tokens)
-        text = re.sub(r'([\,\.\?\:])', r' \1', text)
-        result.append(text)
-
+    result = " ".join(result)
+    # result = re.sub(r'(\s[\.\,\?\:]){2,}', r'\1', result)
     return result
 
 
 def main(args):
+    if args.split_chunk and args.overlap_size < args.min_words_cut:
+        raise ValueError("Min words cut must be smaller than or equal to overlap size when using chunk merging")
     # get all paths
     model = GecBERTModel(vocab_path=args.vocab_path,
                          model_paths=args.model_path,
@@ -156,9 +213,6 @@ if __name__ == '__main__':
                         action='store_true',
                         help='Whether to lowercase tokens.',)
     parser.add_argument('--transformer_model',
-                        choices=['bert', 'gpt2', 'transformerxl', 'xlnet', 'distilbert', 'roberta', 'albert'
-                                 'bert-large', 'roberta-large', 'xlnet-large', 'vinai/phobert-base',
-                                 'vinai/phobert-large', 'xlm-roberta-base'],
                         help='Name of the transformer model.',
                         default='roberta')
     parser.add_argument('--iteration_count',

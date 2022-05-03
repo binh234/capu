@@ -26,7 +26,7 @@ logger = logging.getLogger(__file__)
 
 class GecBERTModel(object):
     def __init__(self, vocab_path=None, model_paths=None,
-                 weigths=None,
+                 weights=None,
                  max_len=64,
                  min_len=3,
                  lowercase_tokens=False,
@@ -39,7 +39,7 @@ class GecBERTModel(object):
                  confidence=0,
                  resolve_cycles=False,
                  ):
-        self.model_weights = list(map(float, weigths)) if weigths else [1] * len(model_paths)
+        self.model_weights = list(map(float, weights)) if weights else [1] * len(model_paths)
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.max_len = max_len
         self.min_len = min_len
@@ -143,9 +143,9 @@ class GecBERTModel(object):
 
         return start_pos - 1, end_pos - 1, sugg_token_clear, prob
 
-    def _get_embbeder(self, weigths_name, special_tokens_fix):
+    def _get_embbeder(self, weights_name, special_tokens_fix):
         embedders = {'bert': PretrainedBertEmbedder(
-            pretrained_model=weigths_name,
+            pretrained_model=weights_name,
             requires_grad=False,
             top_layer_only=True,
             special_tokens_fix=special_tokens_fix)

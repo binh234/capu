@@ -141,7 +141,7 @@ class PretrainedBertIndexer(TokenizerIndexer):
         model_name = copy.deepcopy(pretrained_model)
 
         model_tokenizer = AutoTokenizer.from_pretrained(
-            model_name, do_lower_case=do_lowercase, do_basic_tokenize=False, use_fast=use_fast)
+            model_name, do_lower_case=bool(do_lowercase), do_basic_tokenize=False, use_fast=bool(use_fast))
 
         # to adjust all tokenizers
         if hasattr(model_tokenizer, 'encoder'):

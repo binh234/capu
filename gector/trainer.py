@@ -27,8 +27,6 @@ from allennlp.training.optimizers import Optimizer
 from allennlp.training.tensorboard_writer import TensorboardWriter
 from allennlp.training.trainer_base import TrainerBase
 
-logger = logging.getLogger(__name__)
-
 
 class Trainer(TrainerBase):
     def __init__(
@@ -46,7 +44,7 @@ class Trainer(TrainerBase):
         num_epochs: int = 20,
         accumulated_batch_count: int = 1,
         serialization_dir: Optional[str] = None,
-        num_serialized_models_to_keep: int = 20,
+        num_serialized_models_to_keep: int = 2,
         keep_serialized_model_every_num_seconds: int = None,
         checkpointer: Checkpointer = None,
         model_save_interval: float = None,
@@ -64,6 +62,7 @@ class Trainer(TrainerBase):
         cold_step_count: int = 0,
         cold_lr: float = 1e-3,
         cuda_verbose_step=None,
+        logger=None
     ) -> None:
         """
         A trainer for doing supervised learning. It just takes a labeled dataset
@@ -193,10 +192,11 @@ class Trainer(TrainerBase):
         self.cold_step_count = cold_step_count
         self.cold_lr = cold_lr
         self.cuda_verbose_step = cuda_verbose_step
+        self.logger = logger
 
         if patience is None:  # no early stopping
-            if validation_dataset:
-                logger.warning(
+            if validation_dataset and self.logger:
+                self.logger.warning(
                     "You provided a validation dataset but patience was set to None, "
                     "meaning that early stopping is disabled"
                 )
@@ -295,14 +295,17 @@ class Trainer(TrainerBase):
         """
         Trains one epoch and returns metrics.
         """
-        logger.info("Epoch %d/%d", epoch + 1, self._num_epochs)
+        if self.logger:
+            self.logger.info("Epoch %d/%d", epoch + 1, self._num_epochs)
         print(f"Epoch {epoch + 1}/{self._num_epochs}")
         peak_cpu_usage = peak_memory_mb()
-        logger.info(f"Peak CPU memory usage MB: {peak_cpu_usage}")
+        if self.logger:
+            self.logger.info(f"Peak CPU memory usage MB: {peak_cpu_usage}")
         gpu_usage = []
         for gpu, memory in gpu_memory_mb().items():
             gpu_usage.append((gpu, memory))
-            logger.info(f"GPU {gpu} memory usage MB: {memory}")
+            if self.logger:
+                self.logger.info(f"GPU {gpu} memory usage MB: {memory}")
 
         train_loss = 0.0
         # Set the model to "train" mode.
@@ -324,10 +327,11 @@ class Trainer(TrainerBase):
 
         histogram_parameters = set(self.model.get_parameters_for_histogram_tensorboard_logging())
 
-        logger.info("Training")
+        if self.logger:
+            self.logger.info("Training")
         train_generator_tqdm = Tqdm.tqdm(train_generator, total=num_training_batches)
         cumulative_batch_size = 0
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         for batch_group in train_generator_tqdm:
             batches_this_epoch += 1
             self._batch_num_total += 1
@@ -399,7 +403,9 @@ class Trainer(TrainerBase):
                 if batches_this_epoch % self.accumulated_batch_count == 0 or \
                         batches_this_epoch == num_training_batches:
                     self.optimizer.step()
-                    self.optimizer.zero_grad()
+                    if self.cold_step_count <= epoch:
+                        self.scheduler.step()
+                    self.optimizer.zero_grad(set_to_none=True)
                 for name, param in self.model.named_parameters():
                     param_updates[name].sub_(param.detach().cpu())
                     update_norm = torch.norm(param_updates[name].view(-1))
@@ -411,7 +417,9 @@ class Trainer(TrainerBase):
                 if batches_this_epoch % self.accumulated_batch_count == 0 or \
                         batches_this_epoch == num_training_batches:
                     self.optimizer.step()
-                    self.optimizer.zero_grad()
+                    if self.cold_step_count <= epoch:
+                        self.scheduler.step()
+                    self.optimizer.zero_grad(set_to_none=True)
 
             # Update moving averages
             if self._moving_average is not None:
@@ -439,9 +447,10 @@ class Trainer(TrainerBase):
                 cumulative_batch_size += cur_batch
                 if (batches_this_epoch - 1) % self._log_batch_size_period == 0:
                     average = cumulative_batch_size / batches_this_epoch
-                    logger.info(f"current batch size: {cur_batch} mean batch size: {average}")
                     self._tensorboard.add_train_scalar("current_batch_size", cur_batch)
                     self._tensorboard.add_train_scalar("mean_batch_size", average)
+                    if self.logger:
+                        self.logger.info(f"current batch size: {cur_batch} mean batch size: {average}")
 
             # Save model if needed.
             if self._model_save_interval is not None and (
@@ -462,7 +471,8 @@ class Trainer(TrainerBase):
         """
         Computes the validation loss. Returns it and the number of batches.
         """
-        logger.info("Validating")
+        if self.logger:
+            self.logger.info("Validating")
 
         self.model.eval()
 
@@ -525,7 +535,8 @@ class Trainer(TrainerBase):
 
         training_util.enable_gradient_clipping(self.model, self._grad_clipping)
 
-        logger.info("Beginning training.")
+        if self.logger:
+            self.logger.info("Beginning training.")
 
         train_metrics: Dict[str, float] = {}
         val_metrics: Dict[str, float] = {}
@@ -577,7 +588,8 @@ class Trainer(TrainerBase):
                     self._metric_tracker.add_metric(this_epoch_val_metric)
 
                     if self._metric_tracker.should_stop_early():
-                        logger.info("Ran out of patience.  Stopping training.")
+                        if self.logger:
+                            self.logger.info("Ran out of patience.  Stopping training.")
                         break
 
             self._tensorboard.log_metrics(
@@ -590,14 +602,21 @@ class Trainer(TrainerBase):
             metrics["training_start_epoch"] = epoch_counter
             metrics["training_epochs"] = epochs_trained
             metrics["epoch"] = epoch
+            metrics["lr"] = self.optimizer.param_groups[0]['lr']
 
             for key, value in train_metrics.items():
                 metrics["training_" + key] = value
             for key, value in val_metrics.items():
                 metrics["validation_" + key] = value
 
-            # if self.cold_step_count <= epoch:
-            self.scheduler.step(metrics['validation_loss'])
+            if self.cold_step_count > epoch:
+                new_lr = self.cold_lr / (2 ** (epoch + 1))
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = new_lr
+                if self.logger:
+                    self.logger.info(f"Set learning rate to {new_lr}")
+
+            #     self.scheduler.step(metrics['validation_loss'])
 
             if self._metric_tracker.is_best_so_far():
                 # Update all the best_ metrics.
@@ -623,7 +642,11 @@ class Trainer(TrainerBase):
             self._save_checkpoint(epoch)
 
             epoch_elapsed_time = time.time() - epoch_start_time
-            logger.info("Epoch duration: %s", datetime.timedelta(seconds=epoch_elapsed_time))
+            if self.logger:
+                self.logger.info("Epoch duration: %s", datetime.timedelta(seconds=epoch_elapsed_time))
+                self.logger.info(metrics)
+            print(f"Epoch: {epoch + 1}, lr: {metrics['lr']} - loss: {metrics['training_loss']}, acc: {metrics['training_accuracy']}\
+                \nvalid_loss: {metrics['validation_loss']}, valid_acc: {metrics['validation_accuracy']}")
 
             if epoch < self._num_epochs - 1:
                 training_elapsed_time = time.time() - training_start_time
@@ -631,7 +654,8 @@ class Trainer(TrainerBase):
                     (self._num_epochs - epoch_counter) / float(epoch - epoch_counter + 1) - 1
                 )
                 formatted_time = str(datetime.timedelta(seconds=int(estimated_time_remaining)))
-                logger.info("Estimated training time remaining: %s", formatted_time)
+                if self.logger:
+                    self.logger.info("Estimated training time remaining: %s", formatted_time)
 
             epochs_trained += 1
 
@@ -665,6 +689,7 @@ class Trainer(TrainerBase):
         training_states = {
             "metric_tracker": self._metric_tracker.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
             "batch_num_total": self._batch_num_total,
         }
 
@@ -711,6 +736,7 @@ class Trainer(TrainerBase):
 
         self.model.load_state_dict(model_state)
         self.optimizer.load_state_dict(training_state["optimizer"])
+        self.scheduler.load_state_dict(training_state["scheduler"])
         if self._learning_rate_scheduler is not None \
                 and "learning_rate_scheduler" in training_state:
             self._learning_rate_scheduler.load_state_dict(training_state["learning_rate_scheduler"])

@@ -36,8 +36,12 @@ def get_target_sent_by_edits(source_tokens, edits):
     for edit in edits:
         start, end, label, _ = edit
         target_pos = start + shift_idx
-        source_token = target_tokens[target_pos] \
-            if len(target_tokens) > target_pos >= 0 else ''
+        if start < 0:
+            continue
+        elif len(target_tokens) > target_pos:
+            source_token = target_tokens[target_pos]
+        else:
+            source_token = ""
         if label == "":
             del target_tokens[target_pos]
             shift_idx -= 1
@@ -68,6 +72,10 @@ def get_target_sent_by_edits(source_tokens, edits):
 def replace_merge_transforms(tokens):
     if all(not x.startswith("$MERGE_") for x in tokens):
         return tokens
+    if tokens[0].startswith("$MERGE_"):
+        tokens = tokens[1:]
+    if tokens[-1].startswith("$MERGE_"):
+        tokens = tokens[:-1]
 
     target_line = " ".join(tokens)
     target_line = target_line.replace(" $MERGE_HYPHEN ", "-")
@@ -142,18 +150,27 @@ def apply_reverse_transformation(source_token, transform):
         return source_token
 
 
+# def read_parallel_lines(fn1, fn2):
+#     lines1 = read_lines(fn1, skip_strip=True)
+#     lines2 = read_lines(fn2, skip_strip=True)
+#     assert len(lines1) == len(lines2)
+#     out_lines1, out_lines2 = [], []
+#     for line1, line2 in zip(lines1, lines2):
+#         if not line1.strip() or not line2.strip():
+#             continue
+#         else:
+#             out_lines1.append(line1)
+#             out_lines2.append(line2)
+#     return out_lines1, out_lines2
+
+
 def read_parallel_lines(fn1, fn2):
-    lines1 = read_lines(fn1, skip_strip=True)
-    lines2 = read_lines(fn2, skip_strip=True)
-    assert len(lines1) == len(lines2)
-    out_lines1, out_lines2 = [], []
-    for line1, line2 in zip(lines1, lines2):
-        if not line1.strip() or not line2.strip():
-            continue
-        else:
-            out_lines1.append(line1)
-            out_lines2.append(line2)
-    return out_lines1, out_lines2
+    with open(fn1, encoding='utf-8') as f1, open(fn2, encoding='utf-8') as f2:
+        for line1, line2 in zip(f1, f2):
+            line1 = line1.strip()
+            line2 = line2.strip()
+
+            yield line1, line2
 
 
 def read_lines(fn, skip_strip=False):
