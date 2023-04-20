@@ -113,12 +113,12 @@ class WordpieceIndexer(TokenIndexer[int]):
             self._never_lowercase = set(never_lowercase)
 
         # Convert the start_tokens and end_tokens to wordpiece_ids
-        self._start_piece_ids = [vocab[wordpiece]
+        self._start_piece_ids = [wordpiece
                                  for token in (start_tokens or [])
-                                 for wordpiece in wordpiece_tokenizer(token)]
-        self._end_piece_ids = [vocab[wordpiece]
+                                 for wordpiece in wordpiece_tokenizer(token, add_special_tokens=False)]
+        self._end_piece_ids = [wordpiece
                                for token in (end_tokens or [])
-                               for wordpiece in wordpiece_tokenizer(token)]
+                               for wordpiece in wordpiece_tokenizer(token, add_special_tokens=False)]
 
     @overrides
     def count_vocab_items(self, token: Token, counter: Dict[str, Dict[str, int]]):
@@ -439,6 +439,6 @@ class PretrainedBertIndexer(WordpieceIndexer):
                          is_test=is_test,
                          do_lowercase=do_lowercase,
                          never_lowercase=never_lowercase,
-                         start_tokens=["[CLS]"] if not special_tokens_fix else [],
-                         end_tokens=["[SEP]"] if not special_tokens_fix else [],
+                         start_tokens=[bert_tokenizer.cls_token] if not special_tokens_fix else [],
+                         end_tokens=[bert_tokenizer.sep_token] if not special_tokens_fix else [],
                          truncate_long_sequences=truncate_long_sequences)

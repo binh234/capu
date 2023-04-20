@@ -159,12 +159,12 @@ class GecBERTModel(object):
     def _get_indexer(self, weights_name, special_tokens_fix):
         if "phobert" in weights_name:
             bert_token_indexer = WordpieceIndexer(
-            pretrained_model=weights_name,
-            max_pieces_per_token=5,
-            do_lowercase=self.lowercase_tokens,
-            use_starting_offsets=True,
-            special_tokens_fix=special_tokens_fix
-        )
+                pretrained_model=weights_name,
+                max_pieces_per_token=5,
+                do_lowercase=self.lowercase_tokens,
+                use_starting_offsets=True,
+                special_tokens_fix=special_tokens_fix
+            )
         else:
             bert_token_indexer = PretrainedBertIndexer(
                 pretrained_model=weights_name,
